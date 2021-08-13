@@ -1,0 +1,558 @@
+---
+title: "PISA"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r r package, warning=FALSE}
+library(dplyr)
+library(MASS)
+library(car)
+library(data.table)
+library(ggplot2)
+library(Hmisc)
+library(Rmisc)
+library(mgcv)
+library(rsq)
+library(patchwork)
+library(caret)
+```
+
+
+```{r}
+GB<-get(load('C:/Users/lenovo/Desktop/Dissertation - Project2/GB.rda'))
+summary(GB)
+sum(complete.cases(GB))
+```
+
+
+```{r, warning=FALSE, warning=FALSE}
+PISA<-GB%>%dplyr::select(CNTSCHID,PV5READ,PV5MATH,PV5SCIE,MISCED:year)
+PISA$Digital=rep(0,nrow(PISA))
+# put variables relevant to digital device into one variable - Digital
+for (i in 1:nrow(PISA)){
+  if (is.na(PISA$IC009Q01TA[i])==TRUE | is.na(PISA$IC009Q02TA[i])==TRUE | is.na(PISA$IC009Q03TA[i])==TRUE){
+    PISA$Digital[i]=NA
+  }
+  else if (PISA$IC009Q01TA[i]==1 | PISA$IC009Q02TA[i]==1 | PISA$IC009Q03TA[i]==1){
+    PISA$Digital[i]=1
+  }
+  else{
+    PISA$Digital[i]=2
+  }
+}
+# have 15593 NA's in Digital column, 15239 NA's in IC009Q01TA column
+# 15376 NA's in IC009Q02TA column, 15448 NA's in IC009Q03TA column
+summary(PISA)
+PISA<-PISA%>%dplyr::select(-Digital,-IC009Q01TA,-IC009Q02TA,-IC009Q03TA)
+```
+
+
+```{r, warning=FALSE}
+# helper function to compute the mode
+getmode<-function(x){
+  uniqv<-unique(x)
+  uniqv[which.max(tabulate(match(x,uniqv)))]
+}
+
+# if the variable is categorical variable, computing mode
+# if the variable is numeric, computing mean
+# data imputation
+FillNA.cate<-function(x){
+  for (i in 1:nrow(PISA)){
+    if (is.na(x[i])==TRUE){
+      x[i]<-getmode(x)
+    }
+    else{
+      x[i]<-x[i]
+    }
+  }
+  x
+}
+FillNA.num<-function(x){
+   for (i in 1:nrow(PISA)){
+    if (is.na(x[i])==TRUE){
+      x[i]<-mean(as.numeric(x),na.rm=TRUE)
+    }
+    else{
+      x[i]<-x[i]
+    }
+  }
+  x
+}
+
+# impute NA with mode - Categorical variable
+PISA$MISCED<-FillNA.cate(PISA$MISCED)
+PISA$FISCED<-FillNA.cate(PISA$FISCED)
+PISA$IMMIG<-FillNA.cate(PISA$IMMIG)
+PISA$SCHLTYPE<-FillNA.cate(PISA$SCHLTYPE)
+PISA$SC001Q01TA<-FillNA.cate(PISA$SC001Q01TA)
+PISA$SC013Q01TA<-FillNA.cate(PISA$SC013Q01TA)
+
+# impute NA with mean - Numerical variable
+PISA$ESCS<-FillNA.num(PISA$ESCS)
+PISA$TMINS<-FillNA.num(PISA$TMINS)
+PISA$SC002Q01TA<-FillNA.num(PISA$SC002Q01TA)
+PISA$SC002Q02TA<-FillNA.num(PISA$SC002Q02TA)
+PISA$SC048Q03NA<-FillNA.num(PISA$SC048Q03NA)
+```
+
+
+```{r, warning=FALSE}
+# prepare data for each UK nation
+Scotland<-PISA%>%dplyr::filter(Region==82620)
+England<-PISA%>%dplyr::filter(Region==82611)
+Ireland<-PISA%>%dplyr::filter(Region==82612)
+Wales<-PISA%>%dplyr::filter(Region==82613)
+
+Scotland2015<-PISA%>%dplyr::filter(Region==82620,year==2015)
+Scotland2018<-PISA%>%dplyr::filter(Region==82620,year==2018)
+England2015<-PISA%>%dplyr::filter(Region==82611,year==2015)
+England2018<-PISA%>%dplyr::filter(Region==82611,year==2018)
+Ireland2015<-PISA%>%dplyr::filter(Region==82612,year==2015)
+Ireland2018<-PISA%>%dplyr::filter(Region==82612,year==2018)
+Wales2015<-PISA%>%dplyr::filter(Region==82613,year==2015)
+Wales2018<-PISA%>%dplyr::filter(Region==82613,year==2018)
+```
+
+
+```{r, warning=FALSE}
+# change names and factor levels 
+PISA$SCHLTYPE<-factor(PISA$SCHLTYPE)
+PISA$Region<-factor(PISA$Region)
+PISA$year<-factor(PISA$year)
+PISA$IMMIG<-factor(PISA$IMMIG)
+PISA$gender<-factor(PISA$ST004D01T)
+PISA$ST004D01T<-NULL
+PISA$SC001Q01TA<-factor(PISA$SC001Q01TA)
+PISA$MISCED<-factor(PISA$MISCED)
+PISA$FISCED<-factor(PISA$FISCED)
+PISA$SC013Q01TA<-factor(PISA$SC013Q01TA)
+```
+
+
+```{r data, warning=FALSE}
+# Reading data
+R.PISA<-PISA%>%dplyr::select(-PV5MATH,-PV5SCIE)
+p1<-ggplot(R.PISA,aes(x=PV5READ))+geom_density(color='#4D9DDA',fill='#4D9DDA')+
+  labs(x='Reading Score',y='Density')
+# Maths data
+M.PISA<-PISA%>%dplyr::select(-PV5READ,-PV5SCIE)
+p2<-ggplot(M.PISA,aes(x=PV5MATH))+geom_density(color='#4D9DDA',fill='#4D9DDA')+
+  labs(x='Math Score',y='Density')
+# Science data
+S.PISA<-PISA%>%dplyr::select(-PV5READ,-PV5MATH)
+p3<-ggplot(S.PISA,aes(x=PV5SCIE))+geom_density(color='#4D9DDA',fill='#4D9DDA')+
+  labs(x='Science Score',y='Density')
+p1+p2+p3+plot_layout(nrow=1)
+
+ggplot(R.PISA,aes(x=Region,y=PV5READ,color=Region))+geom_boxplot()+
+  labs(x='Region',y='Read Score',title='The boxplot of read score')+
+  scale_x_discrete(labels=c('England','Northern Ireland','Wales','Scotland'))+
+  guides(fill=guide_legend(title=NULL))+
+  theme(plot.title=element_text(hjust=0.5))
+  
+```
+
+
+```{r, warning=FALSE}
+# show difference between UK nations
+RCI<-data.frame(group.CI(PV5READ~Region:year,R.PISA,ci=0.95))
+MCI<-data.frame(group.CI(PV5MATH~Region:year,M.PISA,ci=0.95))
+SCI<-data.frame(group.CI(PV5SCIE~Region:year,S.PISA,ci=0.95))
+
+RCI%>%ggplot(aes(x=Region:year,y=PV5READ.mean))+
+  geom_tile(aes(height=(PV5READ.upper-PV5READ.lower)),
+            fill='lightblue',alpha=0.8)+
+  geom_text(aes(label=round(PV5READ.mean,2)),
+            show_guide=FALSE)+
+  labs(x='Region&Year',y='Read Score',title='Read Score Distributed by Region and Year')+
+  scale_x_discrete(labels=c('E2015','E2018','N2015','N2018','W2015','W2018','S2015','S2018'))+
+  theme(plot.title=element_text(hjust=0.5))
+
+MCI%>%ggplot(aes(x=Region:year,y=PV5MATH.mean))+
+  geom_tile(aes(height=(PV5MATH.upper-PV5MATH.lower)),
+            fill='lightblue',alpha=0.8)+
+  geom_text(aes(label=round(PV5MATH.mean,2)),
+            show_guide=FALSE)+
+  labs(x='Region&Year',y='Math Score',title='Math Score Distributed by Region and Year')+
+  scale_x_discrete(labels=c('E2015','E2018','N2015','N2018','W2015','W2018','S2015','S2018'))+
+  theme(plot.title=element_text(hjust=0.5))
+
+SCI%>%ggplot(aes(x=Region:year,y=PV5SCIE.mean))+
+  geom_tile(aes(height=(PV5SCIE.upper-PV5SCIE.lower)),
+            fill='lightblue',alpha=0.8)+
+  geom_text(aes(label=round(PV5SCIE.mean,2)),
+            show_guide=FALSE)+
+  labs(x='Region&Year',y='Science Score',title='Science Score Distributed by Region and Year')+
+  scale_x_discrete(labels=c('E2015','E2018','N2015','N2018','W2015','W2018','S2015','S2018'))+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+
+```{r, warning=FALSE}
+# Statistical test - t-test to test statistical difference among UK nations
+# Reading
+# Statistical difference - Nations
+t.test(England$PV5READ,Scotland$PV5READ,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(Scotland$PV5READ,Wales$PV5READ,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(Ireland$PV5READ,Scotland$PV5READ,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(England$PV5READ,Ireland$PV5READ,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(England$PV5READ,Wales$PV5READ,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(Ireland$PV5READ,Wales$PV5READ,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+
+# Statistical difference - Year
+t.test(Ireland2015$PV5READ,Ireland2018$PV5READ,paired=FALSE,alternative="less",
+       var.equal=TRUE)
+t.test(Scotland2015$PV5READ,Scotland2018$PV5READ,paired=FALSE,alternative="less",
+       var.equal=TRUE)
+t.test(England2015$PV5READ,England2018$PV5READ,paired=FALSE,alternative="less",
+       var.equal=TRUE)
+t.test(Wales2015$PV5READ,Wales2018$PV5READ,paired=FALSE,alternative="less",
+       var.equal=TRUE)
+
+# Maths
+# Statistical difference - Nations
+t.test(Scotland$PV5MATH,Ireland$PV5MATH,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(England$PV5MATH,Scotland$PV5MATH,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(Scotland$PV5MATH,Wales$PV5MATH,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(England$PV5MATH,Ireland$PV5MATH,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(England$PV5MATH,Wales$PV5MATH,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(Ireland$PV5MATH,Wales$PV5MATH,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+
+# Statistical difference - Year
+t.test(England2015$PV5MATH,England2018$PV5MATH,paired=FALSE,alternative="less",
+       var.equal=TRUE)
+t.test(Ireland2015$PV5MATH,Ireland2018$PV5MATH,paired=FALSE,alternative="less",
+       var.equal=TRUE)
+t.test(Scotland2015$PV5MATH,Scotland2018$PV5MATH,paired=FALSE,alternative="less",
+       var.equal=TRUE)
+# No statistical difference
+t.test(Wales2015$PV5MATH,Wales2018$PV5MATH,paired=FALSE,alternative="less",
+       var.equal=TRUE)
+
+# Science
+# Statistical difference - Nations
+t.test(Scotland$PV5SCIE,Wales$PV5SCIE,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(England$PV5SCIE,Scotland$PV5SCIE,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(Ireland$PV5SCIE,Scotland$PV5SCIE,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(England$PV5SCIE,Ireland$PV5SCIE,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(England$PV5SCIE,Wales$PV5SCIE,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(Ireland$PV5SCIE,Wales$PV5SCIE,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+
+# Statistical difference - Year
+t.test(Wales2015$PV5SCIE,Wales2018$PV5SCIE,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(Ireland2015$PV5SCIE,Ireland2018$PV5SCIE,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+t.test(Scotland2015$PV5SCIE,Scotland2018$PV5SCIE,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+# No statistical difference
+t.test(England2015$PV5SCIE,England2018$PV5SCIE,paired=FALSE,alternative="greater",
+       var.equal=TRUE)
+```
+
+
+```{r ANOVA - test parameter significance level, warning=FALSE}
+SUM<-rep(0,14)
+Cal.var<-function(x) {
+  for (i in 2:length(x)-2) {
+    aov<-aov(as.vector(unlist(x[,2]))~as.vector(unlist(x[,i+1])))
+    S<-summary(aov)
+    SUM[i]<-S
+  }
+  SUM
+}
+R<-Cal.var(R.PISA)
+M<-Cal.var(M.PISA)
+S<-Cal.var(S.PISA)
+R;M;S
+```
+
+
+```{r data visualization - variable interaction/variation trend, warning=FALSE}
+# visualize interaction 
+# Reading
+R1<-ggplot(R.PISA)+geom_boxplot(aes(x=Region:SCHLTYPE,y=PV5READ))+
+  labs(x='Region & School Type',y='Read Score')+
+  theme(axis.text.x = element_blank())+
+  theme(panel.grid =element_blank())
+R2<-ggplot(R.PISA)+geom_boxplot(aes(x=IMMIG:SC001Q01TA,y=PV5READ))+
+  labs(x='Immigration & Area Type',y='Read Score')+
+  theme(axis.text.x = element_blank())+
+  theme(panel.grid =element_blank())
+R3<-ggplot(R.PISA)+geom_boxplot(aes(x=FISCED:MISCED,y=PV5READ))+
+  labs(x='Father & Mother Education',y='Read Score')+
+  theme(axis.text.x = element_blank())+
+  theme(panel.grid =element_blank())
+(R1+R2)/R3
+
+# Maths
+M1<-ggplot(M.PISA)+geom_boxplot(aes(x=Region:SCHLTYPE,y=PV5MATH))+
+  labs(x='Region & School Type',y='Math Score')+
+  theme(axis.text.x = element_blank())+
+  theme(panel.grid =element_blank())
+M2<-ggplot(M.PISA)+geom_boxplot(aes(x=IMMIG:SC001Q01TA,y=PV5MATH))+
+  labs(x='Immigration & Area Type',y='Math Score')+
+  theme(axis.text.x = element_blank())+
+  theme(panel.grid =element_blank())
+M3<-ggplot(M.PISA)+geom_boxplot(aes(x=FISCED:MISCED,y=PV5MATH))+
+  labs(x='Father & Mother Education',y='Math Score')+
+  theme(axis.text.x = element_blank())+
+  theme(panel.grid =element_blank())
+(M1+M2)/M3
+
+# Science
+S1<-ggplot(S.PISA)+geom_boxplot(aes(x=Region:SCHLTYPE,y=PV5SCIE))+
+  labs(x='Region & School Type',y='Science Score')+
+  theme(axis.text.x = element_blank())+
+  theme(panel.grid =element_blank())
+S2<-ggplot(S.PISA)+geom_boxplot(aes(x=IMMIG:SC001Q01TA,y=PV5SCIE))+
+  labs(x='Immigration & Area Type',y='Science Score')+
+  theme(axis.text.x = element_blank())+
+  theme(panel.grid =element_blank())
+S3<-ggplot(S.PISA)+geom_boxplot(aes(x=FISCED:MISCED,y=PV5SCIE))+
+  labs(x='Father & Mother Education',y='Science Score')+
+  theme(axis.text.x = element_blank())+
+  theme(panel.grid =element_blank())
+(S1+S2)/S3
+```
+
+
+```{r variable selection - AIC/forward selection, warning=FALSE}
+# AIC criteria
+Cal.aic<-function(x,y){
+  model.full<-glm(x~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA+
+             SCHLTYPE+SC001Q01TA+SC002Q01TA+SC002Q02TA+
+             year+gender,data=y,family="gaussian")
+  model1<-glm(x~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA+
+             SCHLTYPE+SC001Q01TA+SC002Q01TA+SC002Q02TA+
+             year,data=y,family="gaussian")
+  model2<-glm(x~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA+
+             SCHLTYPE+SC001Q01TA+SC002Q01TA+SC002Q02TA,
+            data=y,family="gaussian")
+  model3<-glm(x~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA+
+             SCHLTYPE+SC001Q01TA+SC002Q01TA,
+            data=y,family="gaussian")
+  model4<-glm(x~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA+
+             SCHLTYPE+SC001Q01TA,data=y,family="gaussian")
+  model5<-glm(x~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA+
+             SCHLTYPE+SC001Q01TA,data=y,family="gaussian")
+  model6<-glm(x~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA+
+             SCHLTYPE,data=y,family="gaussian")
+  model7<-glm(x~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA,
+            data=y,family="gaussian")
+  model8<-glm(x~MISCED+FISCED+ESCS+IMMIG+TMINS+Region,data=y,family="gaussian")
+  model9<-glm(x~MISCED+FISCED+ESCS+IMMIG+TMINS,data=y,family="gaussian")
+  model10<-glm(x~MISCED+FISCED+ESCS+IMMIG,data=y,family="gaussian")
+  model11<-glm(x~MISCED+FISCED+ESCS,data=y,family="gaussian")
+  model12<-glm(x~MISCED+FISCED,data=y,family="gaussian")
+  model13<-glm(x~MISCED,data=y,family="gaussian")
+  model.aic<-c(model.full$aic,model1$aic,model2$aic,model3$aic,model4$aic,
+               model5$aic,model6$aic,model7$aic,model8$aic,model9$aic,
+               model10$aic,model11$aic,model12$aic,model13$aic)
+  model.name<-c('full model','model1','model2','model3','model4','model5',
+                'model6','model7','model8','model9','model10','model11',
+                'model12','model13')
+  data.table(model.name,model.aic)
+}
+
+# Reading
+# full model
+RAIC<-Cal.aic(R.PISA$PV5READ,R.PISA)
+arrange(RAIC,model.aic)
+
+# Maths
+# full model
+MAIC<-Cal.aic(M.PISA$PV5MATH,M.PISA)
+arrange(MAIC,model.aic)
+
+# Science
+# remove gender
+SAIC<-Cal.aic(S.PISA$PV5SCIE,S.PISA)
+arrange(SAIC,model.aic)
+```
+
+
+```{r Model - Glm, warning=FALSE}
+# Reading - full model 
+model.Read<-glm(PV5MATH~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA+
+             SCHLTYPE+SC001Q01TA+SC002Q01TA+SC002Q02TA+year+gender,
+             data=R.PISA,family="gaussian")
+summary(model.Read)
+
+# Add interaction
+model.Ropm<-glm(PV5READ~MISCED*FISCED+ESCS+TMINS+Region*SCHLTYPE+
+                  SC048Q03NA+IMMIG:SC001Q01TA+SC002Q01TA+SC002Q02TA+year+gender,
+                data=R.PISA,family="gaussian")
+summary(model.Ropm)
+par(mfrow=c(2,2))
+plot(model.Ropm)
+# optimal model better
+# R^2=0.150;R^2=0.158
+rsq(model.Read);rsq(model.Ropm)
+# AIC=330052.1;AIC=329891.6
+model.Read$aic;model.Ropm$aic
+anova(model.Read,model.Ropm,test="Chisq")
+
+# Maths - full model 
+model.Math<-glm(PV5MATH~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA+
+             SCHLTYPE+SC001Q01TA+SC002Q01TA+SC002Q02TA+year+gender,
+             data=M.PISA,family="gaussian")
+summary(model.Math)
+
+# Add interaction
+model.Mopm<-glm(PV5MATH~MISCED*FISCED+ESCS+IMMIG*SC001Q01TA+TMINS+Region*SCHLTYPE+
+                  SC048Q03NA+SC002Q01TA+SC002Q02TA+year+gender,
+                data=M.PISA,family="gaussian")
+summary(model.Mopm)
+par(mfrow=c(2,2))
+plot(model.Mopm)
+# optimal model better
+# R^2=0.168;R^2=0.176
+rsq(model.Math);rsq(model.Mopm)
+# AIC=324857.9;AIC=324709.1
+model.Math$aic;model.Mopm$aic
+anova(model.Math,model.Mopm,test="Chisq")
+
+# Science - remove gender
+model.Scie<-glm(PV5SCIE~MISCED+FISCED+ESCS+IMMIG+TMINS+Region+SC048Q03NA+
+             SCHLTYPE+SC001Q01TA+SC002Q01TA+SC002Q02TA+year,
+             data=S.PISA,family="gaussian")
+summary(model.Scie)
+
+# Add interaction
+model.Sopm<-glm(PV5SCIE~MISCED*FISCED+IMMIG*SC001Q01TA+ESCS+TMINS+Region+
+                  SC048Q03NA+SCHLTYPE+SC002Q01TA+SC002Q02TA+year,
+             data=S.PISA,family="gaussian")
+summary(model.Sopm)
+par(mfrow=c(2,2))
+plot(model.Sopm)
+# optimal model better
+# R^2=0.161;R^2=0.167
+rsq(model.Scie);rsq(model.Sopm)
+model.Scie$aic;model.Sopm$aic
+anova(model.Scie,model.Sopm,test="Chisq")
+
+importance.R<-caret::varImp(model.Read,scale=FALSE)
+R.i<-as.data.frame(importance.R)
+names<-c('MISCED1','MISCED2','MISCED3','MISCED4','MISCED5','MISCED6',
+         'FISCED1','FISCED2','FISCED3','FISCED4','FISCED5','FISCED6',
+         'ESCS','IMMIG2','IMMIG3','TMINS','Region82612','Region82613',
+         'Region82620','Deprivation percentage','SCHLTYPE2','SCHLTYPE3',
+         'Area Type2','Area Type3','Area Type4','Area Type5','Number boys',
+         'Number girls','year2018','gender2')
+rank.R<-as.data.frame(cbind(names,R.i))
+colnames(rank.R)<-c('variables','importance')
+feature.R<-rank.R%>%arrange(desc(importance))%>%head(5)
+R.S<-ggplot(feature.R, aes(x = importance, y = reorder(variables,importance))) +    geom_bar(stat="identity", fill = 'steelblue') + ylab('variables')+
+  labs(title = 'Read')+
+  theme(plot.title=element_text(hjust=0.5))
+
+# Visualize important factors
+importance.M<-caret::varImp(model.Math,scale=FALSE)
+M.i<-as.data.frame(importance.M)
+names<-c('MISCED1','MISCED2','MISCED3','MISCED4','MISCED5','MISCED6',
+         'FISCED1','FISCED2','FISCED3','FISCED4','FISCED5','FISCED6',
+         'ESCS','IMMIG2','IMMIG3','TMINS','Region82612','Region82613',
+         'Region82620','Deprivation percentage','SCHLTYPE2','SCHLTYPE3',
+         'Area Type2','Area Type3','Area Type4','Area Type5','Number boys',
+         'Number girls','year2018','gender2')
+rank.M<-as.data.frame(cbind(names,M.i))
+colnames(rank.M)<-c('variables','importance')
+feature.M<-rank.M%>%arrange(desc(importance))%>%head(5)
+M.S<-ggplot(feature.M, aes(x = importance, y = reorder(variables,importance))) +    geom_bar(stat="identity", fill = 'steelblue') + ylab('variables')+
+  labs(title = 'Maths')+
+  theme(plot.title=element_text(hjust=0.5))
+
+importance.S<-caret::varImp(model.Scie,scale=FALSE)
+S.i<-as.data.frame(importance.S)
+names<-c('MISCED1','MISCED2','MISCED3','MISCED4','MISCED5','MISCED6',
+         'FISCED1','FISCED2','FISCED3','FISCED4','FISCED5','FISCED6',
+         'ESCS','IMMIG1','IMMIG2','TMINS','Region82612','Region82613',
+         'Region82620','Deprivation percentage','SCHLTYPE2','SCHLTYPE3',
+         'Area Type2','Area Type3','Area Type4','Area Type5','Number boys',
+         'Number girls','year2018')
+rank.S<-as.data.frame(cbind(names,S.i))
+colnames(rank.S)<-c('variables','importance')
+feature.S<-rank.S%>%arrange(desc(importance))%>%head(5)
+f.S<-ggplot(feature.S, aes(x = importance, y = reorder(variables,importance))) +    geom_bar(stat="identity", fill = 'steelblue') + ylab('variables')+
+  labs(title = 'Science')+
+  theme(plot.title=element_text(hjust=0.5))
+plot_grid(R.S,M.S,f.S) + ggtitle('Features ranked') + theme(plot.title = element_text(hjust = 0.5))
+(R.S+M.S)/f.S+ ggtitle('Features ranked') + theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+```{r Model Evaluation - GAM, warning=FALSE, warning=FALSE}
+# Reading
+# GAM
+mod.Read<-gam(PV5READ~s(MISCED,FISCED,bs='re')+s(IMMIG,bs='re')+s(TMINS,ESCS,bs='tp')+s(Region,SCHLTYPE,bs='re')+s(SC048Q03NA,bs='tp')+s(SC001Q01TA,bs='re')+s(SC002Q01TA,bs='tp')+s(SC002Q02TA,bs='tp')+s(year,bs = 're')+s(gender,bs='re'),data=R.PISA,family='gaussian')
+# R-Squared 0.223
+summary(mod.Read)
+# model check
+plot(mod.Read)
+mod.Read$aic
+gam.check(mod.Read)
+qq.gam(mod.Read,main='Q-Q plot of Reading')
+
+# Maths 
+# GAM
+mod.Math<-gam(PV5MATH~s(MISCED,FISCED,bs='re')+s(IMMIG,bs='re')+s(TMINS,ESCS,bs='tp')+s(Region,SCHLTYPE,bs='re')+s(SC048Q03NA,bs='tp')+s(SC001Q01TA,bs='re')+s(SC002Q01TA,bs='tp')+s(SC002Q02TA,bs='tp')+s(year,bs='re')+s(gender,bs='re'),data=M.PISA,family='gaussian')
+# R-Squared 0.232
+summary(mod.Math)
+# model check
+plot(mod.Math)
+# AIC=322664.8
+mod.Math$aic
+gam.check(mod.Math)
+qq.gam(mod.Math,main='Q-Q plot of Math')
+
+# Science 
+mod.Scie<-gam(PV5SCIE~s(MISCED,FISCED,bs='re')+s(IMMIG,bs='re')+s(TMINS,ESCS,bs='tp')+s(Region,SCHLTYPE,bs='re')+s(SC048Q03NA,bs='tp')+s(SC001Q01TA,bs='re')+s(SC002Q01TA,bs='tp')+s(SC002Q02TA,bs='tp')+s(year,bs='re')+s(gender,bs='re'),data=S.PISA,family='gaussian')
+# R-Squared 0.227
+summary(mod.Scie)
+
+observed.yR <- napredict(mod.Read$na.action, mod.Read$y)
+observed.yM <- napredict(mod.Math$na.action, mod.Math$y)
+observed.yS <- napredict(mod.Scie$na.action, mod.Scie$y)
+plot(fitted(mod.Read), observed.yR, xlab = "Fitted Values", 
+     ylab = "Response",main="Read")
+plot(fitted(mod.Math), observed.yM, xlab = "Fitted Values", 
+     ylab = "Response",main="Mathematics")
+plot(fitted(mod.Scie), observed.yS, xlab = "Fitted Values", 
+     ylab = "Response",main="Science")ck
+mod.Scie$aic
+gam.check(mod.Scie)
+qq.gam(mod.Scie,main='Q-Q plot of Science')
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
